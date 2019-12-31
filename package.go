@@ -2,6 +2,7 @@ package gedis
 
 import (
 	"bufio"
+	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -90,7 +91,55 @@ func (p *Package) Call(fn string, args ...interface{}) error {
 	}
 	defer L.Close()
 
-	// TODO: forward call to fn
-	// 1- Build the proper L Values
+	fnValue := L.GetGlobal(fn)
+
+	if fnValue.Type() == lua.LTNil {
+		return fmt.Errorf("unknown function")
+	}
+	L.Push(fnValue)
+	for _, arg := range args {
+		L.Push(value(arg))
+	}
+
+	err = L.PCall(len(args), lua.MultRet, nil)
+	if err != nil {
+		return err
+	}
+	fmt.Println("Top:", L.GetTop())
+	result := make([]lua.LValue, L.GetTop())
+
+	top := L.GetTop()
+	for i := -top; i < 0; i++ {
+		result[len(result)+i] = L.Get(i)
+	}
+	L.Pop(L.GetTop())
+
+	// TODO: return proper result
+	fmt.Println(result)
 	return nil
+}
+
+//value return a lua value from Go value.
+//TODO: cover entire range of builtin values, plus tables, arrays and structures
+func value(in interface{}) lua.LValue {
+	switch v := in.(type) {
+	case nil:
+		return lua.LNil
+	case bool:
+		return lua.LBool(v)
+	case int:
+		return lua.LNumber(v)
+	case int64:
+		return lua.LNumber(v)
+	case uint64:
+		return lua.LNumber(v)
+	case float64:
+		return lua.LNumber(v)
+	case string:
+		return lua.LString(v)
+	// table, userdata,
+	default:
+		fmt.Printf("Type: %T\n", in)
+		return lua.LNil
+	}
 }
