@@ -11,13 +11,31 @@ import (
 
 	"github.com/iancoleman/strcase"
 	"github.com/pkg/errors"
+	"github.com/yuin/gluamapper"
 	lua "github.com/yuin/gopher-lua"
 	"github.com/yuin/gopher-lua/parse"
 )
 
-// Package represents a gedis package
-type Package struct {
-	pool *StatePool
+var (
+	defaultMapOption = gluamapper.Option{}
+)
+
+// Results are call results
+type Results []interface{}
+
+// Module definition
+type Module func(*lua.LState) (string, lua.LGFunction)
+
+// Package interface
+type Package interface {
+	Call(fn string, args ...interface{}) (Results, error)
+	Close() error
+}
+
+// luaPackage represents a gedis package
+type luaPackage struct {
+	pool    *StatePool
+	modules []Module
 }
 
 // CompileLua reads the passed lua file from disk and compiles it.
@@ -40,7 +58,7 @@ func compileLua(filePath string) (*lua.FunctionProto, error) {
 }
 
 // NewPackage create a new package
-func NewPackage(p string) (*Package, error) {
+func NewPackage(p string, modules ...Module) (Package, error) {
 	files, err := ioutil.ReadDir(p)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to list package directory")
@@ -62,6 +80,12 @@ func NewPackage(p string) (*Package, error) {
 	pool := NewPool(50, PoolOptions{
 		Open: func() (*lua.LState, error) {
 			state := lua.NewState()
+
+			// preload modules
+			for _, module := range modules {
+				state.PreloadModule(module(state))
+			}
+
 			for _, proto := range protos {
 				fn := state.NewFunctionFromProto(proto)
 				state.Push(fn)
@@ -74,30 +98,30 @@ func NewPackage(p string) (*Package, error) {
 		},
 	})
 
-	pkg := &Package{
-		pool: pool,
+	pkg := &luaPackage{
+		pool:    pool,
+		modules: modules,
 	}
 
 	return pkg, nil
 }
 
-// Get a Lua State object
-func (p *Package) Get() (*LState, error) {
-	return p.pool.Get()
+func (p *luaPackage) Close() error {
+	return p.pool.Close()
 }
 
 // Call a package method
-func (p *Package) Call(fn string, args ...interface{}) error {
+func (p *luaPackage) Call(fn string, args ...interface{}) (Results, error) {
 	L, err := p.pool.Get()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer L.Close()
 
 	fnValue := L.GetGlobal(fn)
 
 	if fnValue.Type() == lua.LTNil {
-		return fmt.Errorf("unknown function")
+		return nil, fmt.Errorf("unknown function")
 	}
 	L.Push(fnValue)
 	for _, arg := range args {
@@ -106,20 +130,25 @@ func (p *Package) Call(fn string, args ...interface{}) error {
 
 	err = L.PCall(len(args), lua.MultRet, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	fmt.Println("Top:", L.GetTop())
-	result := make([]lua.LValue, L.GetTop())
+	results := make([]lua.LValue, L.GetTop())
 
 	top := L.GetTop()
 	for i := -top; i < 0; i++ {
-		result[len(result)+i] = L.Get(i)
+		results[len(results)+i] = L.Get(i)
 	}
 	L.Pop(L.GetTop())
 
-	// TODO: return proper result
-	fmt.Println(result)
-	return nil
+	var returns []interface{}
+	for _, result := range results {
+
+		returns = append(returns,
+			gluamapper.ToGoValue(result, defaultMapOption),
+		)
+	}
+
+	return returns, nil
 }
 
 func fromNumber(in interface{}) lua.LValue {
