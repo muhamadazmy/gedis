@@ -6,7 +6,10 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"reflect"
+	"unicode"
 
+	"github.com/iancoleman/strcase"
 	"github.com/pkg/errors"
 	lua "github.com/yuin/gopher-lua"
 	"github.com/yuin/gopher-lua/parse"
@@ -98,7 +101,7 @@ func (p *Package) Call(fn string, args ...interface{}) error {
 	}
 	L.Push(fnValue)
 	for _, arg := range args {
-		L.Push(value(arg))
+		L.Push(value(L, arg))
 	}
 
 	err = L.PCall(len(args), lua.MultRet, nil)
@@ -119,27 +122,96 @@ func (p *Package) Call(fn string, args ...interface{}) error {
 	return nil
 }
 
+func fromNumber(in interface{}) lua.LValue {
+	switch v := in.(type) {
+	case int:
+		return lua.LNumber(v)
+	case int8:
+		return lua.LNumber(v)
+	case int16:
+		return lua.LNumber(v)
+	case int32:
+		return lua.LNumber(v)
+	case int64:
+		return lua.LNumber(v)
+	case uint:
+		return lua.LNumber(v)
+	case uint8:
+		return lua.LNumber(v)
+	case uint16:
+		return lua.LNumber(v)
+	case uint32:
+		return lua.LNumber(v)
+	case uint64:
+		return lua.LNumber(v)
+	case float32:
+		return lua.LNumber(v)
+	case float64:
+		return lua.LNumber(v)
+	default:
+		return nil
+	}
+
+}
+
+func fromData(l *LState, in interface{}) lua.LValue {
+	t := l.NewTable()
+	//t.RawGetH()
+	v := reflect.ValueOf(in)
+	switch v.Kind() {
+	case reflect.Slice:
+		for i := 0; i < v.Len(); i++ {
+			t.Append(value(l, v.Index(i).Interface()))
+		}
+	case reflect.Map:
+		r := v.MapRange()
+		for r.Next() {
+			t.RawSet(value(l, r.Key().Interface()), value(l, r.Value().Interface()))
+		}
+	case reflect.Struct:
+		typ := v.Type()
+		for i := 0; i < typ.NumField(); i++ {
+			name := typ.Field(i).Name
+			var f rune
+			// TODO find a better way to get
+			// the first rune of a string
+			// NOTE: we do this not with 'index' because unicode rune
+			// might span more than one byte. hence iteration is the
+			// only way to read a full rune
+			for _, c := range name {
+				f = c
+				break
+			}
+
+			if unicode.IsLower(f) {
+				continue
+			}
+			t.RawSetString(strcase.ToSnake(name), value(l, v.Field(i).Interface()))
+		}
+	//TODO: case pointers: we probably never have this use case.
+	default:
+		panic(fmt.Sprintf("invald kind '%s'", v.Kind()))
+	}
+
+	return t
+}
+
 //value return a lua value from Go value.
 //TODO: cover entire range of builtin values, plus tables, arrays and structures
-func value(in interface{}) lua.LValue {
+func value(l *LState, in interface{}) lua.LValue {
+	num := fromNumber(in)
+	if num != nil {
+		return num
+	}
+
 	switch v := in.(type) {
 	case nil:
 		return lua.LNil
 	case bool:
 		return lua.LBool(v)
-	case int:
-		return lua.LNumber(v)
-	case int64:
-		return lua.LNumber(v)
-	case uint64:
-		return lua.LNumber(v)
-	case float64:
-		return lua.LNumber(v)
 	case string:
 		return lua.LString(v)
-	// table, userdata,
 	default:
-		fmt.Printf("Type: %T\n", in)
-		return lua.LNil
+		return fromData(l, in)
 	}
 }
