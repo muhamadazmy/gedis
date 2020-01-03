@@ -34,8 +34,7 @@ type Package interface {
 
 // luaPackage represents a gedis package
 type luaPackage struct {
-	pool    *StatePool
-	modules []Module
+	pool *StatePool
 }
 
 // CompileLua reads the passed lua file from disk and compiles it.
@@ -99,8 +98,7 @@ func NewPackage(p string, modules ...Module) (Package, error) {
 	})
 
 	pkg := &luaPackage{
-		pool:    pool,
-		modules: modules,
+		pool: pool,
 	}
 
 	return pkg, nil

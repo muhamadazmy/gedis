@@ -20,6 +20,37 @@ func NewRedis(addr string, mgr gedis.PackageManager) *Redis {
 	return &Redis{addr: addr, mgr: mgr}
 }
 
+func (r *Redis) packageRemove(cmd redcon.Command) error {
+	args := cmd.Args[1:]
+	if len(args) != 1 {
+		return fmt.Errorf("invalid number of arguments expecting '<name>'")
+	}
+
+	name := string(args[0])
+	return r.mgr.Remove(name)
+}
+
+func (r *Redis) packageAdd(cmd redcon.Command) error {
+	args := cmd.Args[1:]
+	if len(args) != 2 {
+		return fmt.Errorf("invalid number of arguments expecting '<name> <path>'")
+	}
+
+	name := string(args[0])
+	path := string(args[1])
+	return r.mgr.Add(name, path)
+}
+
+func (r *Redis) simple(conn redcon.Conn, cmd redcon.Command, f func(cmd redcon.Command) error) {
+	err := f(cmd)
+	if err != nil {
+		conn.WriteError(err.Error())
+		return
+	}
+
+	conn.WriteString("OK")
+}
+
 func (r *Redis) handleInternal(conn redcon.Conn, cmd redcon.Command) {
 	// we allow internal commands to be case insensitive
 	c := strings.ToLower(string(cmd.Args[0]))
@@ -33,11 +64,11 @@ func (r *Redis) handleInternal(conn redcon.Conn, cmd redcon.Command) {
 			conn.WriteString(pkg)
 		}
 	case ".package.add":
-		fallthrough
+		r.simple(conn, cmd, r.packageAdd)
 	case ".package.remove":
-		fallthrough
+		r.simple(conn, cmd, r.packageRemove)
 	case ".set.content-type":
-		conn.WriteString("OK")
+		conn.WriteError("not implemented")
 	default:
 		conn.WriteError(fmt.Sprintf("unknown command '%s'", c))
 	}

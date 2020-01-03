@@ -49,9 +49,13 @@ func (m *luaPackageManager) Add(name, path string) error {
 	m.m.Lock()
 	defer m.m.Unlock()
 
+	if _, ok := m.packages[name]; ok {
+		return fmt.Errorf("package with name '%s' already exists", name)
+	}
+
 	pkg, err := NewPackage(path, m.modules...)
 	if err != nil {
-		return errors.Wrapf(err, "failed to add package: %s(%s)", name, path)
+		return errors.Wrapf(err, "failed to load package: %s (%s)", name, path)
 	}
 
 	m.packages[name] = pkg
