@@ -67,8 +67,10 @@ func (r *Redis) handleInternal(conn redcon.Conn, cmd redcon.Command) {
 		r.simple(conn, cmd, r.packageAdd)
 	case ".package.remove":
 		r.simple(conn, cmd, r.packageRemove)
-	case ".set.content-type":
+	case ".content-type.set":
 		conn.WriteError("not implemented")
+	case ".content-type.get":
+		conn.WriteString("JSON")
 	default:
 		conn.WriteError(fmt.Sprintf("unknown command '%s'", c))
 	}
